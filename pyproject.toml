@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools==84.0.0", "wheel==0.46.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-mnemosyne-learning-bridge"
+dynamic = ["version"]
+description = "Project-isolated, evidence-grounded memory controls for Hermes Agent and Mnemosyne"
+readme = "README.md"
+license = "MIT"
+authors = [{name = "Adithyan Arun Kumar"}]
+requires-python = ">=3.11,<3.12"
+keywords = [
+  "hermes-agent",
+  "mnemosyne",
+  "ai-agent-memory",
+  "project-isolation",
+  "verified-execution",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "mnemosyne-hermes @ git+https://github.com/mnemosyne-oss/mnemosyne.git@8e6c010bc823b7833061f0ee53c2a73a9dd6dd24#subdirectory=integrations/hermes",
+  "mnemosyne-memory==3.15.1",
+  "PyYAML==6.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build==1.4.0",
+  "mypy==1.19.1",
+  "pip-audit==2.10.0",
+  "pytest==9.1.1",
+  "ruff==0.15.7",
+  "twine==6.2.0",
+  "types-PyYAML==6.0.12.20260815",
+]
+
+[project.entry-points."hermes_agent.memory_providers"]
+mnemosyne-learning-bridge = "mnemosyne_learning_bridge.provider:register"
+
+[project.urls]
+Homepage = "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge"
+Documentation = "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge/tree/main/docs"
+Repository = "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge"
+Issues = "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "mnemosyne_learning_bridge.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+no_implicit_optional = true

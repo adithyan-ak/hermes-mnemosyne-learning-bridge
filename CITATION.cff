@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this experimental software, cite this repository."
+title: "Hermes Mnemosyne Learning Bridge"
+type: software
+authors:
+  - family-names: "Kumar"
+    given-names: "Adithyan Arun"
+version: 0.2.0
+date-released: 2026-08-29
+repository-code: "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge"
+url: "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge"
+license: MIT
+keywords:
+  - Hermes Agent
+  - Mnemosyne
+  - agent memory
+  - project isolation
+  - provenance

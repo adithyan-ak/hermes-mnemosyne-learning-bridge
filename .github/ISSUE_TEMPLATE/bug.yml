@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible defect using synthetic data only
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste memory databases, credentials, private paths, customer data, or raw conversations. Use synthetic fixtures.
+  - type: input
+    id: version
+    attributes:
+      label: Bridge version or commit
+      placeholder: v0.2.0 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, OS, Hermes installation method, and Mnemosyne versions
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Minimal steps and synthetic inputs
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I replaced secrets, personal data, private repository names, paths, and memory content with synthetic values.
+          required: true

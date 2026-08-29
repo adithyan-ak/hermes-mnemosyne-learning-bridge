@@ -1,0 +1,21 @@
+flowchart LR
+    A["Completed Hermes turn"]
+    B["Evidence extractor<br/><small>reviewed tool-result shapes</small>"]
+    C["Project identity<br/><small>canonical remote → SHA-256</small>"]
+    D["Policy boundary<br/><small>filter · stage · block</small>"]
+    E["Mnemosyne<br/><small>compact durable episode</small>"]
+    F["Filtered recall<br/><small>same project only</small>"]
+
+    A --> B
+    C --> B
+    B --> D
+    D -->|bounded background write| E
+    E --> F
+    F -->|prefetch or explicit recall| A
+
+    classDef hermes fill:#dbeafe,stroke:#1d4ed8,color:#172033,stroke-width:2px;
+    classDef guard fill:#fef3c7,stroke:#b45309,color:#172033,stroke-width:2px;
+    classDef store fill:#ede9fe,stroke:#6d28d9,color:#172033,stroke-width:2px;
+    class A,F hermes;
+    class B,C,D guard;
+    class E store;

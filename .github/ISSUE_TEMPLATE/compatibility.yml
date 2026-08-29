@@ -1,0 +1,51 @@
+name: Compatibility report
+description: Report a tested Hermes or Mnemosyne combination
+title: "[compat] "
+labels: [compatibility]
+body:
+  - type: input
+    id: bridge
+    attributes:
+      label: Bridge version or commit
+    validations:
+      required: true
+  - type: input
+    id: hermes
+    attributes:
+      label: Hermes version or commit
+    validations:
+      required: true
+  - type: input
+    id: mnemosyne
+    attributes:
+      label: Mnemosyne core and adapter versions or commits
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python and operating system
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks performed
+      options:
+        - label: Entry-point discovery and initialization
+        - label: Synthetic staged write, exact payload review, apply, and read-back
+        - label: Cross-process same-project recall
+        - label: Foreign-project exclusion
+        - label: Synthetic deletion and integrity diagnostics
+        - label: Rollback to the previous provider
+  - type: textarea
+    id: notes
+    attributes:
+      label: Results and sanitized logs
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: This report contains synthetic data only.
+          required: true

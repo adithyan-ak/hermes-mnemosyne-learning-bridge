@@ -1,0 +1,41 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build output
+build/
+dist/
+*.whl
+
+# Local and private state
+.env
+.env.*
+config.yaml
+SOUL.md
+USER.md
+MEMORY.md
+backup/
+backups/
+artifacts/
+pending/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.gz
+*.pem
+*.key
+deployment-manifest.json
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
