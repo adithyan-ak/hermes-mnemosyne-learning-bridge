@@ -16,8 +16,37 @@ def test_every_installed_mnemosyne_tool_has_an_explicit_policy() -> None:
     assert Decision.UNKNOWN not in decisions.values()
 
 
-def test_durable_fact_writes_are_staged_for_foreground_approval() -> None:
-    assert classify_tool("mnemosyne_remember", {}) is Decision.STAGE
+def test_direct_stated_user_memory_is_written_without_second_approval() -> None:
+    assert (
+        classify_tool(
+            "mnemosyne_remember",
+            {
+                "content": "Telegram is the user's primary Hermes channel",
+                "scope": "global",
+                "source": "user",
+                "veracity": "stated",
+                "extract": False,
+                "extract_entities": False,
+            },
+        )
+        is Decision.DIRECT
+    )
+
+
+def test_ambiguous_or_inferred_memory_is_not_treated_as_direct() -> None:
+    assert classify_tool("mnemosyne_remember", {}) is Decision.BLOCK
+    assert (
+        classify_tool(
+            "mnemosyne_remember",
+            {
+                "content": "The user may prefer Telegram",
+                "scope": "global",
+                "source": "assistant",
+                "veracity": "inferred",
+            },
+        )
+        is Decision.BLOCK
+    )
 
 
 def test_dry_run_mutations_are_read_only_but_unsupported_live_mutations_block() -> None:

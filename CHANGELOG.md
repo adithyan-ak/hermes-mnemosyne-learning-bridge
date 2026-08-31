@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.1 - 2026-08-31
+
+- Write explicit user-stated ordinary memories directly with exact deterministic read-back.
+- Return `clarification_required` for ambiguous ordinary-memory payloads instead of silently omitting or staging them.
+- Keep updates and deletions behind foreground-bound staged approval.
+
 ## 0.2.0 - 2026-08-29
 
 Initial public alpha.

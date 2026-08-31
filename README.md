@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](pyproject.toml)
 
-A project-aware memory provider for [Hermes Agent](https://github.com/NousResearch/hermes-agent) and [Mnemosyne](https://github.com/mnemosyne-oss/mnemosyne). It stores compact execution evidence instead of raw conversations, filters execution memories by project, and requires explicit confirmation before supported memory mutations are applied.
+A project-aware memory provider for [Hermes Agent](https://github.com/NousResearch/hermes-agent) and [Mnemosyne](https://github.com/mnemosyne-oss/mnemosyne). It stores compact execution evidence instead of raw conversations, filters execution memories by project, writes explicit user-stated ordinary memories with verified read-back, and requires confirmation for supported changes to existing memory.
 
 > [!WARNING]
 > This is an experimental alpha. It deliberately exposes fewer mutation tools than the stock Mnemosyne provider and currently targets Python 3.11 plus a pinned Mnemosyne adapter revision. Use it with backups and test rollback before relying on it.
@@ -21,7 +21,7 @@ The bridge adds four controls:
 
 - **Evidence-grounded episodes.** It records at most one compact episode from meaningful tool results. It does not copy user prompts, assistant prose, or raw tool output into the episode.
 - **Project isolation.** Equivalent SSH and HTTPS Git remotes map to the same hashed project ID. Project episodes are filtered during explicit recall and silent prefetch.
-- **Mutation approval.** Supported writes, updates, and deletes are staged with the exact review payload. Applying one requires an exact foreground `APPLY <id>` message and deterministic read-back.
+- **Proportionate mutation controls.** A direct user-stated ordinary memory (`source="user"`, `veracity="stated"`, explicit scope, extraction disabled) writes immediately and is read back exactly. Ambiguous writes request clarification. Updates and deletes remain staged and require an exact foreground `APPLY <id>` plus deterministic read-back.
 - **Fail-closed policy.** Unknown and unsupported mutation families stay hidden or blocked.
 
 ## What it stores
@@ -72,13 +72,13 @@ memory:
 
 Set these values with `hermes config set`; do not hand-edit the live Hermes configuration.
 
-Only these mutation families are currently staged and supported:
+Only these mutation families are currently supported:
 
-- `mnemosyne_remember`
+- `mnemosyne_remember` — direct only for explicit user-stated ordinary memories; otherwise returns `clarification_required`
 - `mnemosyne_update`
 - `mnemosyne_forget`
 
-The stage result and pending-list tool return the exact tool arguments plus a SHA-256 digest. Inspect that review payload before sending `APPLY <id>`. A claimed mutation is single-use; if application or read-back fails, stage a new mutation rather than replaying the old ID.
+Updates and deletes are staged. Their stage result and pending-list tool return the exact tool arguments plus a SHA-256 digest. Inspect that review payload before sending `APPLY <id>`. A claimed mutation is single-use; if application or read-back fails, stage a new mutation rather than replaying the old ID.
 
 Canonical, graph, shared-memory, validation, synchronization, import/export, repair, and consolidation mutations remain blocked unless the operation is explicitly classified as read-only.
 

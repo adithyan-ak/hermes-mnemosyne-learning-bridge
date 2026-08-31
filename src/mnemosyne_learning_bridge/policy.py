@@ -28,10 +28,7 @@ _READ_TOOLS = {
     "mnemosyne_persona_list",
 }
 
-_DIRECT_TOOLS: set[str] = set()
-
 _STAGE_TOOLS = {
-    "mnemosyne_remember",
     "mnemosyne_update",
     "mnemosyne_forget",
 }
@@ -68,8 +65,15 @@ _BLOCK_TOOLS = {
 def classify_tool(tool_name: str, args: dict[str, Any]) -> Decision:
     if tool_name in _READ_TOOLS:
         return Decision.READ
-    if tool_name in _DIRECT_TOOLS:
-        return Decision.DIRECT
+    if tool_name == "mnemosyne_remember":
+        is_direct_user_statement = (
+            args.get("scope") in {"session", "global"}
+            and args.get("source") == "user"
+            and args.get("veracity") == "stated"
+            and not bool(args.get("extract"))
+            and not bool(args.get("extract_entities"))
+        )
+        return Decision.DIRECT if is_direct_user_statement else Decision.BLOCK
     if tool_name in _STAGE_TOOLS:
         return Decision.STAGE
     if tool_name == "mnemosyne_batch":

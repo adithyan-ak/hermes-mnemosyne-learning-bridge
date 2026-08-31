@@ -24,7 +24,7 @@ The outcome describes the final meaningful evidence item. A failed command is st
 
 ### Mutation policy
 
-`policy.py` classifies each Mnemosyne tool as read-only, staged, blocked, or unknown. Unknown mutations fail closed.
+`policy.py` classifies each Mnemosyne tool as read-only, direct, staged, blocked, or unknown. Unknown mutations fail closed. An ordinary memory is direct only when it has an explicit scope, `source="user"`, `veracity="stated"`, and disabled extraction. The provider verifies every direct write by reading back the exact stored record. Other ordinary write payloads return `clarification_required` so the agent asks instead of silently omitting an important ambiguity.
 
 `pending.py` stores owner-only pending records. A record is content-addressed, expires, is bound to the originating session and project, and can be claimed only once. Stage and list results expose the exact tool, payload, and payload digest for review. The provider requires both an exact tool argument and an exact foreground user message before applying a supported mutation. Once claimed, an ID cannot be replayed, including after an application or verification failure.
 
@@ -34,7 +34,7 @@ Hermes requires `sync_turn()` to return without waiting for storage latency. The
 
 ## Extension points
 
-The current evidence recognizers and mutation adapters are intentionally conservative. New tool-result validators should be explicit functions with synthetic adversarial tests. New mutation families require:
+The current evidence recognizers and mutation adapters are intentionally conservative. New tool-result validators should be explicit functions with synthetic adversarial tests. Apart from the narrowly defined direct ordinary-memory path above, new mutation families require:
 
 1. a precise policy classification;
 2. an owner-only staged representation;

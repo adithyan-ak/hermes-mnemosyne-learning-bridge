@@ -275,23 +275,15 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                 return json.dumps({"status": "error", "error": str(exc)})
             return json.dumps({"status": "rejected", "pending_id": pending_id})
         decision = classify_tool(tool_name, args)
-        if (
-            tool_name == "mnemosyne_remember"
-            and decision is Decision.STAGE
-            and (
-                args.get("scope") not in {"session", "global"}
-                or args.get("source") != "user"
-                or args.get("veracity") != "stated"
-                or bool(args.get("extract"))
-                or bool(args.get("extract_entities"))
-            )
-        ):
+        if tool_name == "mnemosyne_remember" and decision is Decision.BLOCK:
             return json.dumps(
                 {
-                    "status": "blocked",
+                    "status": "clarification_required",
                     "error": "ordinary_remember_requires_explicit_scope_source_and_stated_veracity",
                 }
             )
+        if tool_name == "mnemosyne_remember" and decision is Decision.DIRECT:
+            return self._direct_remember(args)
         if decision is Decision.STAGE:
             hermes_home = self._hermes_home or str(Path.home() / ".hermes")
             return json.dumps(
@@ -337,6 +329,113 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                     "results": [],
                 }
             )
+
+    def _direct_remember(self, payload: dict[str, Any]) -> str:
+        """Write an explicit user-stated memory and verify the exact stored record."""
+        mutation_raw = super().handle_tool_call("mnemosyne_remember", payload)
+        try:
+            mutation = json.loads(mutation_raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return json.dumps({"status": "error", "error": "mutation returned invalid JSON"})
+        if not self._mutation_acknowledged("mnemosyne_remember", payload, mutation):
+            return json.dumps(
+                {
+                    "status": "verification_failed",
+                    "error": "mutation_not_acknowledged",
+                    "mutation": mutation,
+                }
+            )
+
+        memory_id = str(mutation.get("memory_id") or "")
+        try:
+            readback: dict[str, Any] = json.loads(
+                super().handle_tool_call("mnemosyne_get", {"memory_id": memory_id})
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return json.dumps(
+                {
+                    "status": "verification_failed",
+                    "error": "readback returned invalid JSON",
+                    "mutation": mutation,
+                }
+            )
+        api_memory = readback.get("memory")
+        storage_memory = self._ordinary_memory_storage_readback(memory_id)
+        memory = storage_memory or {}
+        if isinstance(api_memory, dict) and storage_memory is not None:
+            readback["memory"] = {**api_memory, **storage_memory}
+        verified = bool(
+            readback.get("status") == "ok"
+            and isinstance(api_memory, dict)
+            and api_memory.get("id") == memory_id
+            and memory.get("id") == memory_id
+            and memory.get("content") == payload.get("content")
+            and memory.get("scope") == payload.get("scope")
+            and memory.get("source") == payload.get("source")
+            and memory.get("veracity") == payload.get("veracity")
+        )
+        if verified and payload.get("importance") is not None:
+            verified = memory.get("importance") == payload.get("importance")
+        if verified and payload.get("valid_until") is not None:
+            verified = memory.get("valid_until") == payload.get("valid_until")
+        if verified and payload.get("metadata") is not None:
+            memory_metadata = memory.get("metadata")
+            if isinstance(memory_metadata, str):
+                try:
+                    memory_metadata = json.loads(memory_metadata)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    memory_metadata = None
+            verified = memory_metadata == payload.get("metadata")
+        if not verified:
+            return json.dumps(
+                {
+                    "status": "verification_failed",
+                    "mutation": mutation,
+                    "readback": readback,
+                }
+            )
+
+        result = dict(mutation)
+        result["verified"] = True
+        result["readback"] = readback
+        return json.dumps(result)
+
+    def _ordinary_memory_storage_readback(self, memory_id: str) -> dict[str, Any] | None:
+        """Read fields omitted by the public get tool from Mnemosyne's authoritative store."""
+        if not memory_id or self._beam is None:
+            return None
+        columns = (
+            "content",
+            "source",
+            "importance",
+            "metadata_json",
+            "veracity",
+            "valid_until",
+            "scope",
+        )
+        try:
+            with self._ensure_beam_access_lock():
+                row = None
+                for table in ("working_memory", "episodic_memory"):
+                    row = self._beam.conn.execute(
+                        f"SELECT {', '.join(columns)} FROM {table} WHERE id = ?",
+                        (memory_id,),
+                    ).fetchone()
+                    if row is not None:
+                        break
+        except sqlite3.Error:
+            return None
+        if row is None:
+            return None
+        record = {"id": memory_id, **dict(zip(columns, row, strict=True))}
+        try:
+            metadata = json.loads(record["metadata_json"] or "{}")
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(metadata, dict):
+            return None
+        record["metadata"] = metadata
+        return record
 
     def _apply_bridge_pending(self, args: dict[str, Any]) -> str:
         pending_id = str(args.get("pending_id") or "").strip()
@@ -395,6 +494,7 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                 }
             )
         verified = False
+        readback: Any = None
         if tool == "mnemosyne_remember":
             memory_id = str(mutation.get("memory_id") or "")
             readback = (
@@ -402,10 +502,15 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                 if memory_id
                 else {"status": "not_found"}
             )
-            memory_value = readback.get("memory")
-            memory = memory_value if isinstance(memory_value, dict) else {}
+            api_memory = readback.get("memory")
+            storage_memory = self._ordinary_memory_storage_readback(memory_id)
+            memory = storage_memory or {}
+            if isinstance(api_memory, dict) and storage_memory is not None:
+                readback["memory"] = {**api_memory, **storage_memory}
             verified = bool(
                 readback.get("status") == "ok"
+                and isinstance(api_memory, dict)
+                and api_memory.get("id") == memory_id
                 and memory.get("id") == memory_id
                 and memory.get("content") == payload.get("content")
                 and memory.get("scope") == payload.get("scope")

@@ -373,7 +373,7 @@ def test_ordinary_remember_requires_explicit_stated_provenance_and_scope(tmp_pat
     )
 
     assert result == {
-        "status": "blocked",
+        "status": "clarification_required",
         "error": "ordinary_remember_requires_explicit_scope_source_and_stated_veracity",
     }
     inferred = json.loads(
@@ -387,22 +387,44 @@ def test_ordinary_remember_requires_explicit_stated_provenance_and_scope(tmp_pat
             },
         )
     )
-    assert inferred["status"] == "blocked"
+    assert inferred["status"] == "clarification_required"
     pending_dir = tmp_path / "pending" / "memory"
     assert not pending_dir.exists() or not list(pending_dir.glob("*.json"))
 
 
-def test_ordinary_remember_applies_after_user_confirmation_and_exact_readback(
+def test_ordinary_stated_user_memory_writes_directly_with_exact_readback(
     tmp_path, monkeypatch
 ) -> None:
     provider = ProjectAwareMnemosyneProvider()
     provider._hermes_home = str(tmp_path)
+    connection = sqlite3.connect(":memory:")
+    connection.execute(
+        "CREATE TABLE working_memory ("
+        "id TEXT PRIMARY KEY, content TEXT, source TEXT, importance REAL, "
+        "metadata_json TEXT, veracity TEXT, valid_until TEXT, scope TEXT)"
+    )
     payload = {
         "content": "The user prefers concise answers",
         "scope": "global",
         "source": "user",
         "veracity": "stated",
+        "metadata": {"channel": "telegram"},
+        "valid_until": "2026-09-02",
     }
+    connection.execute(
+        "INSERT INTO working_memory VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "mem-stated",
+            payload["content"],
+            "user",
+            0.5,
+            json.dumps(payload["metadata"]),
+            "stated",
+            payload["valid_until"],
+            "global",
+        ),
+    )
+    provider._beam = SimpleNamespace(conn=connection)
 
     def base_call(self, name, args):
         if name == "mnemosyne_remember":
@@ -414,8 +436,8 @@ def test_ordinary_remember_applies_after_user_confirmation_and_exact_readback(
                     "memory": {
                         "id": "mem-stated",
                         "content": payload["content"],
-                        "scope": "global",
                         "source": "user",
+                        "metadata": json.dumps(payload["metadata"]),
                         "veracity": "stated",
                     },
                 }
@@ -427,19 +449,15 @@ def test_ordinary_remember_applies_after_user_confirmation_and_exact_readback(
         "handle_tool_call",
         base_call,
     )
-    staged = json.loads(provider.handle_tool_call("mnemosyne_remember", payload))
-    pending_id = staged["pending_id"]
-    _authorize(provider, "APPLY", pending_id)
+    result = json.loads(provider.handle_tool_call("mnemosyne_remember", payload))
 
-    result = json.loads(
-        provider.handle_tool_call(
-            "mnemosyne_bridge_apply_pending",
-            {"pending_id": pending_id, "confirmation": f"APPLY {pending_id}"},
-        )
-    )
-
-    assert result["status"] == "applied"
+    assert result["status"] == "stored"
+    assert result["verified"] is True
+    assert result["readback"]["memory"]["metadata"] == payload["metadata"]
+    assert result["readback"]["memory"]["valid_until"] == payload["valid_until"]
     assert result["readback"]["memory"]["veracity"] == "stated"
+    pending_dir = tmp_path / "pending" / "memory"
+    assert not pending_dir.exists() or not list(pending_dir.glob("*.json"))
 
 
 def test_apply_pending_update_reads_back_exact_memory(tmp_path, monkeypatch) -> None:
@@ -607,12 +625,10 @@ def test_staged_mutation_and_pending_list_expose_exact_review_payload(tmp_path) 
     provider._hermes_home = str(tmp_path)
     staged = json.loads(
         provider.handle_tool_call(
-            "mnemosyne_remember",
+            "mnemosyne_update",
             {
+                "memory_id": "mem-pending-review",
                 "content": "durable preference",
-                "scope": "global",
-                "source": "user",
-                "veracity": "stated",
             },
         )
     )
@@ -620,19 +636,17 @@ def test_staged_mutation_and_pending_list_expose_exact_review_payload(tmp_path) 
     result = json.loads(provider.handle_tool_call("mnemosyne_bridge_pending_list", {}))
 
     expected_payload = {
+        "memory_id": "mem-pending-review",
         "content": "durable preference",
-        "scope": "global",
-        "source": "user",
-        "veracity": "stated",
     }
     assert staged["review"] == {
-        "tool": "mnemosyne_remember",
+        "tool": "mnemosyne_update",
         "payload": expected_payload,
         "payload_sha256": staged["review"]["payload_sha256"],
     }
     assert result["count"] == 1
     assert result["pending"][0]["id"] == staged["pending_id"]
-    assert result["pending"][0]["tool"] == "mnemosyne_remember"
+    assert result["pending"][0]["tool"] == "mnemosyne_update"
     assert result["pending"][0]["review"] == staged["review"]
     assert result["pending"][0]["review"]["payload"] == expected_payload
 
@@ -642,12 +656,10 @@ def test_unclaimed_apply_attempt_cannot_delete_another_call_claim(tmp_path) -> N
     provider._hermes_home = str(tmp_path)
     staged = json.loads(
         provider.handle_tool_call(
-            "mnemosyne_remember",
+            "mnemosyne_update",
             {
+                "memory_id": "mem-pending-review",
                 "content": "durable preference",
-                "scope": "global",
-                "source": "user",
-                "veracity": "stated",
             },
         )
     )
@@ -672,12 +684,10 @@ def test_reject_pending_requires_exact_confirmation_and_deletes_record(tmp_path)
     provider._hermes_home = str(tmp_path)
     staged = json.loads(
         provider.handle_tool_call(
-            "mnemosyne_remember",
+            "mnemosyne_update",
             {
+                "memory_id": "mem-pending-review",
                 "content": "durable preference",
-                "scope": "global",
-                "source": "user",
-                "veracity": "stated",
             },
         )
     )
@@ -727,12 +737,10 @@ def test_model_supplied_confirmation_without_foreground_turn_is_blocked(tmp_path
     provider._hermes_home = str(tmp_path)
     staged = json.loads(
         provider.handle_tool_call(
-            "mnemosyne_remember",
+            "mnemosyne_update",
             {
+                "memory_id": "mem-pending-review",
                 "content": "durable preference",
-                "scope": "global",
-                "source": "user",
-                "veracity": "stated",
             },
         )
     )
@@ -755,12 +763,10 @@ def test_pending_approval_is_bound_to_staging_session(tmp_path) -> None:
     provider._session_id = "session-a"
     staged = json.loads(
         provider.handle_tool_call(
-            "mnemosyne_remember",
+            "mnemosyne_update",
             {
+                "memory_id": "mem-pending-review",
                 "content": "durable preference",
-                "scope": "global",
-                "source": "user",
-                "veracity": "stated",
             },
         )
     )

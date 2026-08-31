@@ -92,14 +92,12 @@ Check that:
 Use a disposable value that contains no credentials, personal facts, customer data, private paths, or repository names.
 
 1. In a fresh Hermes session, request an ordinary global write with a unique synthetic value, `source="user"`, `veracity="stated"`, `extract=false`, and `extract_entities=false`.
-2. Confirm that `mnemosyne_remember` returns `status="staged"` rather than writing immediately.
-3. Inspect the returned `review.tool`, the complete `review.payload`, and `review.payload_sha256`. Do not approve if any field differs from the requested mutation.
-4. Send a new foreground message containing only `APPLY <pending_id>`.
-5. Confirm that `mnemosyne_bridge_apply_pending` returns `status="applied"` and an exact deterministic read-back.
-6. Start another Hermes process in the same repository and recall the canary using different wording.
-7. Produce one synthetic, deterministic execution episode in that repository. Confirm it can be recalled in the same repository and is absent from a different repository.
-8. Stage deletion of the canary, inspect the exact review payload, apply it, and verify that recall returns nothing.
-9. Run `hermes doctor` and the available Mnemosyne integrity diagnostics.
+2. Confirm that `mnemosyne_remember` returns `status="stored"` or `status="deduplicated"`, `verified=true`, and an exact deterministic `readback`. It must not create a pending record.
+3. Send an intentionally incomplete synthetic write and confirm that it returns `status="clarification_required"` without writing or staging anything.
+4. Start another Hermes process in the same repository and recall the canary using different wording.
+5. Produce one synthetic, deterministic execution episode in that repository. Confirm it can be recalled in the same repository and is absent from a different repository.
+6. Stage deletion of the canary, inspect the exact review payload, send a new foreground message containing only `APPLY <pending_id>`, and verify that recall returns nothing.
+7. Run `hermes doctor` and the available Mnemosyne integrity diagnostics.
 
 Pending IDs are single-use once claimed. If mutation application or read-back fails, inspect the error and stage a new mutation. Do not replay the old ID.
 
