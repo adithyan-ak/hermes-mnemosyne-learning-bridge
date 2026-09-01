@@ -80,3 +80,48 @@ def test_cross_session_episode_recall_is_project_isolated_and_deduplicated(tmp_p
     first._beam.conn.close()
     same_project._beam.conn.close()
     other_project._beam.conn.close()
+
+
+def test_global_ordinary_memory_can_be_corrected_from_a_later_session(tmp_path: Path) -> None:
+    db_path = tmp_path / "mnemosyne.db"
+    first = _provider(db_path, "project-a", "session-one")
+    first._hermes_home = str(tmp_path)
+    first.on_turn_start(1, "The user prefers concise answers")
+    stored = json.loads(
+        first.handle_tool_call(
+            "mnemosyne_remember",
+            {
+                "content": "The user prefers concise answers",
+                "scope": "global",
+                "source": "user",
+                "veracity": "stated",
+                "extract": False,
+                "extract_entities": False,
+            },
+        )
+    )
+    memory_id = stored["memory_id"]
+    first._beam.conn.close()
+
+    second = _provider(db_path, "project-a", "session-two")
+    second._hermes_home = str(tmp_path)
+    staged = json.loads(
+        second.handle_tool_call(
+            "mnemosyne_update",
+            {"memory_id": memory_id, "content": "The user prefers concise technical answers"},
+        )
+    )
+    pending_id = staged["pending_id"]
+    second.on_turn_start(1, f"APPLY {pending_id}")
+    applied = json.loads(
+        second.handle_tool_call(
+            "mnemosyne_bridge_apply_pending",
+            {"pending_id": pending_id, "confirmation": f"APPLY {pending_id}"},
+        )
+    )
+
+    assert applied["status"] == "applied", applied
+    assert applied["readback"]["memory"]["content"] == (
+        "The user prefers concise technical answers"
+    )
+    second._beam.conn.close()

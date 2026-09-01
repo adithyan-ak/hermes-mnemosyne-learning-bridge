@@ -2,6 +2,7 @@ import json
 import sqlite3
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import mnemosyne_hermes
@@ -67,6 +68,7 @@ def test_git_remote_lookup_uses_nul_framing_and_preserves_boundary_spaces(
 def test_provider_prefetch_removes_foreign_project_episode(monkeypatch) -> None:
     provider = ProjectAwareMnemosyneProvider()
     provider._project_id = "github.com/acme/app"
+    provider._beam = SimpleNamespace(recall=lambda **kwargs: [])
     monkeypatch.setattr(
         mnemosyne_hermes.MnemosyneMemoryProvider,
         "prefetch",
@@ -135,6 +137,44 @@ def test_provider_filters_foreign_project_episode_from_get(monkeypatch) -> None:
     assert result["status"] == "not_found"
     assert result["memory"] is None
     assert "secret episode" not in json.dumps(result)
+
+
+def test_recall_refills_requested_window_after_foreign_project_filtering(monkeypatch) -> None:
+    provider = ProjectAwareMnemosyneProvider()
+    provider._project_id = "project-a"
+    foreign = [
+        {
+            "id": f"foreign-{index}",
+            "content": "[PROJECT:project-b] parser workflow",
+            "metadata": {"kind": "execution_episode", "project_id": "project-b"},
+        }
+        for index in range(6)
+    ]
+    allowed = [
+        {
+            "id": "same-project",
+            "content": "[PROJECT:project-a] parser workflow",
+            "metadata": {"kind": "execution_episode", "project_id": "project-a"},
+        },
+        {
+            "id": "global-fact",
+            "content": "The user prefers parser workflow summaries",
+            "metadata": {"kind": "preference"},
+        },
+    ]
+
+    def base_call(self, name, args):
+        rows = (foreign + allowed)[: int(args.get("limit", 5))]
+        return json.dumps({"count": len(rows), "results": rows})
+
+    monkeypatch.setattr(mnemosyne_hermes.MnemosyneMemoryProvider, "handle_tool_call", base_call)
+
+    result = json.loads(
+        provider.handle_tool_call("mnemosyne_recall", {"query": "parser workflow", "limit": 2})
+    )
+
+    assert result["count"] == 2
+    assert [row["id"] for row in result["results"]] == ["same-project", "global-fact"]
 
 
 def test_provider_fails_closed_when_recall_filter_cannot_parse_payload(monkeypatch) -> None:
@@ -397,6 +437,7 @@ def test_ordinary_stated_user_memory_writes_directly_with_exact_readback(
 ) -> None:
     provider = ProjectAwareMnemosyneProvider()
     provider._hermes_home = str(tmp_path)
+    provider.on_turn_start(1, "The user prefers concise answers")
     connection = sqlite3.connect(":memory:")
     connection.execute(
         "CREATE TABLE working_memory ("
@@ -458,6 +499,57 @@ def test_ordinary_stated_user_memory_writes_directly_with_exact_readback(
     assert result["readback"]["memory"]["veracity"] == "stated"
     pending_dir = tmp_path / "pending" / "memory"
     assert not pending_dir.exists() or not list(pending_dir.glob("*.json"))
+
+
+def test_direct_remember_requires_verbatim_current_foreground_grounding(tmp_path) -> None:
+    provider = ProjectAwareMnemosyneProvider()
+    provider._hermes_home = str(tmp_path)
+    provider.on_turn_start(1, "What time is it?")
+
+    result = json.loads(
+        provider.handle_tool_call(
+            "mnemosyne_remember",
+            {
+                "content": "The user permanently prefers synthetic mode",
+                "scope": "global",
+                "source": "user",
+                "veracity": "stated",
+                "extract": False,
+                "extract_entities": False,
+            },
+        )
+    )
+
+    assert result == {
+        "status": "clarification_required",
+        "error": "ordinary_remember_requires_current_user_grounding",
+    }
+
+
+def test_direct_remember_rejects_secret_bearing_foreground_fact(tmp_path) -> None:
+    provider = ProjectAwareMnemosyneProvider()
+    provider._hermes_home = str(tmp_path)
+    secret = "OPENAI_API_KEY=" + "x" * 24
+    provider.on_turn_start(1, f"My current value is {secret}")
+
+    result = json.loads(
+        provider.handle_tool_call(
+            "mnemosyne_remember",
+            {
+                "content": secret,
+                "scope": "global",
+                "source": "user",
+                "veracity": "stated",
+                "extract": False,
+                "extract_entities": False,
+            },
+        )
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error": "payload failed secret-safety gate",
+    }
 
 
 def test_apply_pending_update_reads_back_exact_memory(tmp_path, monkeypatch) -> None:
@@ -579,6 +671,41 @@ def test_initialize_disables_upstream_automatic_consolidation(tmp_path, monkeypa
     assert provider._auto_sleep_enabled is False
 
 
+def test_initialize_uses_hermes_runtime_workspace_when_host_omits_cwd(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "config.yaml").write_text(
+        "memory:\n"
+        "  memory_enabled: false\n"
+        "  user_profile_enabled: false\n"
+        "  mnemosyne:\n"
+        "    sync_roles: []\n"
+    )
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    monkeypatch.setattr(
+        "mnemosyne_learning_bridge.provider._hermes_runtime_workdir",
+        lambda: workspace,
+    )
+    monkeypatch.setattr(
+        mnemosyne_hermes.MnemosyneMemoryProvider,
+        "initialize",
+        lambda self, session_id, **kwargs: setattr(self, "_sync_roles", set()),
+    )
+    provider = ProjectAwareMnemosyneProvider()
+    seen = []
+    monkeypatch.setattr(
+        provider,
+        "_git_remote",
+        lambda workdir: seen.append(Path(workdir)) or "git@example.com:team/project.git",
+    )
+
+    provider.initialize("session-1", hermes_home=str(tmp_path), platform="telegram")
+
+    assert seen == [workspace]
+    assert provider._project_id.startswith("remote:sha256:")
+
+
 def test_session_end_never_calls_upstream_consolidation(monkeypatch) -> None:
     upstream_called = threading.Event()
     monkeypatch.setattr(
@@ -590,6 +717,21 @@ def test_session_end_never_calls_upstream_consolidation(monkeypatch) -> None:
 
     provider.on_session_end([])
 
+    assert upstream_called.is_set() is False
+
+
+def test_turn_start_does_not_call_locking_upstream_hook(monkeypatch) -> None:
+    upstream_called = threading.Event()
+    monkeypatch.setattr(
+        mnemosyne_hermes.MnemosyneMemoryProvider,
+        "on_turn_start",
+        lambda self, turn_number, message, **kwargs: upstream_called.set(),
+    )
+    provider = ProjectAwareMnemosyneProvider()
+
+    provider.on_turn_start(7, "A clear foreground fact")
+
+    assert provider._turn_count == 7
     assert upstream_called.is_set() is False
 
 
@@ -625,6 +767,19 @@ def test_provider_exposes_bridge_approval_tools_and_hides_unsafe_upstream_apply(
     assert "mnemosyne_apply_pending" not in names
     assert "review payload" in schemas["mnemosyne_bridge_pending_list"]["description"]
     assert "inspect" in schemas["mnemosyne_bridge_apply_pending"]["description"]
+
+
+def test_provider_prompt_describes_only_the_restricted_bridge_surface() -> None:
+    provider = ProjectAwareMnemosyneProvider()
+    provider._beam = SimpleNamespace()
+
+    prompt = provider.system_prompt_block()
+
+    assert "mnemosyne_remember" in prompt
+    assert "mnemosyne_recall" in prompt
+    assert "mnemosyne_remember_canonical" not in prompt
+    assert "mnemosyne_triple_add" not in prompt
+    assert "mnemosyne_shared_" not in prompt
 
 
 def test_staged_mutation_and_pending_list_expose_exact_review_payload(tmp_path) -> None:

@@ -35,6 +35,65 @@ def test_trivial_successful_inspection_does_not_create_execution_episode() -> No
     )
 
 
+def test_pytest_version_probe_does_not_create_verified_test_episode() -> None:
+    messages = [
+        {"role": "user", "content": "Check the pytest version."},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "version",
+                    "function": {
+                        "name": "terminal",
+                        "arguments": json.dumps({"command": "pytest --version"}),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "version",
+            "tool_name": "terminal",
+            "content": json.dumps({"exit_code": 0, "output": "pytest 9.1.1"}),
+        },
+    ]
+
+    assert build_episode(messages, project_id="project-a", session_id="s", turn_id="t") is None
+
+
+def test_pytest_verbose_flag_still_counts_as_test_execution() -> None:
+    messages = [
+        {"role": "user", "content": "Run the parser tests."},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "test",
+                    "function": {
+                        "name": "terminal",
+                        "arguments": json.dumps({"command": "pytest -v tests/test_parser.py"}),
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "test",
+            "tool_name": "terminal",
+            "content": json.dumps({"exit_code": 0, "output": "1 passed"}),
+        },
+    ]
+
+    episode = build_episode(messages, project_id="project-a", session_id="s", turn_id="t")
+
+    assert episode is not None
+    assert episode.metadata["verification_evidence"][0]["kind"] == "test_result"
+
+
+def test_multiline_authorization_secret_is_detected_without_json_escape_blind_spot() -> None:
+    assert contains_secret("Authorization:\nBearer " + "x" * 24)
+
+
 def test_structured_tool_failure_creates_verified_failure_episode() -> None:
     messages = [
         {"role": "user", "content": "Apply the change."},

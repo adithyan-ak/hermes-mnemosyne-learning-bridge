@@ -14,13 +14,23 @@ import yaml
 from mnemosyne_hermes import MnemosyneMemoryProvider
 
 from . import __version__
-from .evidence import Episode, build_episode, latest_completed_turn
+from .evidence import Episode, build_episode, contains_secret, latest_completed_turn
 from .filtering import filter_prefetch_text, filter_recall_payload
 from .pending import claim_pending, list_pending, stage_mutation
 from .policy import Decision, classify_tool, is_tool_visible
 from .project import normalize_project_id, normalize_project_reference
 
 logger = logging.getLogger(__name__)
+
+
+def _hermes_runtime_workdir() -> Path | None:
+    """Read Hermes's session-scoped logical cwd when the host exposes it."""
+    try:
+        from agent.runtime_cwd import resolve_agent_cwd
+
+        return resolve_agent_cwd()
+    except (ImportError, OSError):
+        return None
 
 
 class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
@@ -74,6 +84,7 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
     def __init__(self) -> None:
         super().__init__()
         self._project_id = ""
+        self._foreground_user_message = ""
         self._foreground_confirmation: tuple[str, str] | None = None
         self._confirmation_lock = threading.Lock()
         self._episode_queue: queue.Queue[tuple[Episode, str] | object] = queue.Queue(maxsize=32)
@@ -82,12 +93,13 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs: Any) -> None:
         """Capture an exact host-delivered user confirmation for this turn only."""
+        self._foreground_user_message = str(message or "")
         match = re.fullmatch(r"(APPLY|REJECT) ([A-Za-z0-9]{1,64})", str(message or ""))
         with self._confirmation_lock:
             self._foreground_confirmation = (
                 (match.group(1), match.group(2)) if match is not None else None
             )
-        super().on_turn_start(turn_number, message, **kwargs)
+        self._turn_count = turn_number
 
     def _consume_foreground_confirmation(self, action: str, pending_id: str) -> bool:
         with self._confirmation_lock:
@@ -197,8 +209,10 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                 "Mnemosyne bridge requires sole durable authority and sync_roles: []"
             )
         explicit_raw = str(kwargs.pop("project_id", "") or "").strip()
-        has_explicit_workdir = bool(kwargs.get("workdir") or kwargs.get("cwd"))
-        workdir = Path(kwargs.get("workdir") or kwargs.get("cwd") or Path.cwd())
+        supplied_workdir = kwargs.get("workdir") or kwargs.get("cwd")
+        runtime_workdir = supplied_workdir or _hermes_runtime_workdir()
+        has_explicit_workdir = bool(runtime_workdir)
+        workdir = Path(runtime_workdir or Path.cwd())
         remote = self._git_remote(workdir)
         derived = (
             normalize_project_id(workdir=workdir, git_remote=remote)
@@ -221,14 +235,55 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
         for schema in super().get_tool_schemas():
             name = str(schema.get("name") or "")
             if is_tool_visible(name):
+                if name == "mnemosyne_remember":
+                    schema = dict(schema)
+                    schema["description"] = (
+                        str(schema.get("description") or "")
+                        + " Direct auto-write requires content to be a verbatim span of the "
+                        "current foreground user message; otherwise ask for clarification."
+                    )
                 schemas.append(schema)
         return schemas + list(self._BRIDGE_TOOL_SCHEMAS)
 
-    def prefetch(self, query: str, *, session_id: str = "") -> str:
-        return filter_prefetch_text(
-            super().prefetch(query, session_id=session_id),
-            self._project_id,
+    def system_prompt_block(self) -> str:
+        """Describe the bridge's reduced tool surface instead of upstream-only tools."""
+        self._maybe_retry_init()
+        if not self._beam:
+            if self._init_error is not None:
+                return super().system_prompt_block()
+            return ""
+        base = (
+            "# Mnemosyne Memory Bridge\n"
+            "Use mnemosyne_recall before asking the user to repeat durable context. "
+            "Use mnemosyne_remember for clear additive user facts: its content must be a "
+            "verbatim span of the current foreground user message, with explicit scope, "
+            'source="user", veracity="stated", and extraction disabled. Ambiguous facts '
+            "require clarification. Updates and deletions are staged and require exact "
+            "foreground approval plus deterministic read-back. Unknown or unavailable "
+            "mutation families remain blocked."
         )
+        return self._with_persona_block(base)
+
+    def prefetch(self, query: str, *, session_id: str = "") -> str:
+        self._maybe_retry_init()
+        if not self._beam:
+            return ""
+        with self._ensure_beam_access_lock():
+            original_recall = self._beam.recall
+
+            def project_filtered_recall(*args: Any, **kwargs: Any) -> Any:
+                kwargs["top_k"] = max(2000, int(kwargs.get("top_k", 0)))
+                raw = original_recall(*args, **kwargs)
+                return json.loads(filter_recall_payload(raw, self._project_id))
+
+            self._beam.recall = project_filtered_recall
+            try:
+                return filter_prefetch_text(
+                    super().prefetch(query, session_id=session_id),
+                    self._project_id,
+                )
+            finally:
+                self._beam.recall = original_recall
 
     def handle_tool_call(self, tool_name: str, args: dict[str, Any]) -> str:
         current_session = str(getattr(self, "_session_id", "") or "")
@@ -283,6 +338,22 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                 }
             )
         if tool_name == "mnemosyne_remember" and decision is Decision.DIRECT:
+            content = " ".join(str(args.get("content") or "").split())
+            foreground = " ".join(self._foreground_user_message.split())
+            if not content or content not in foreground:
+                return json.dumps(
+                    {
+                        "status": "clarification_required",
+                        "error": "ordinary_remember_requires_current_user_grounding",
+                    }
+                )
+            if contains_secret(args):
+                return json.dumps(
+                    {
+                        "status": "rejected",
+                        "error": "payload failed secret-safety gate",
+                    }
+                )
             return self._direct_remember(args)
         if decision is Decision.STAGE:
             hermes_home = self._hermes_home or str(Path.home() / ".hermes")
@@ -309,6 +380,35 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                     "error": f"{tool_name} has no reviewed mutation policy",
                 }
             )
+        if tool_name == "mnemosyne_recall" and decision is Decision.READ:
+            try:
+                requested = max(1, int(args.get("limit", 5)))
+                max_fetch = 2000
+                fetch_limit = min(max_fetch, max(20, requested * 4))
+                while True:
+                    expanded = dict(args)
+                    expanded["limit"] = fetch_limit
+                    raw = super().handle_tool_call(tool_name, expanded)
+                    filtered = json.loads(filter_recall_payload(raw, self._project_id))
+                    results = list(filtered.get("results") or [])
+                    if len(results) >= requested or fetch_limit >= max_fetch:
+                        break
+                    raw_count = int(filtered.get("count") or 0)
+                    if raw_count < fetch_limit:
+                        break
+                    fetch_limit = min(max_fetch, fetch_limit * 2)
+                filtered["results"] = results[:requested]
+                filtered["count"] = len(filtered["results"])
+                return json.dumps(filtered, ensure_ascii=False)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                logger.error("Mnemosyne bridge project filter failed; suppressing read results")
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": "project_filter_failed",
+                        "results": [],
+                    }
+                )
         result = super().handle_tool_call(tool_name, args)
         if decision is not Decision.READ:
             return result
@@ -473,7 +573,33 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
                     "pending_id": pending_id,
                 }
             )
-        mutation_raw = super().handle_tool_call(tool, payload)
+        if tool == "mnemosyne_update" and self._beam is not None:
+            with self._ensure_beam_access_lock():
+                owner = self._beam.conn.execute(
+                    "SELECT session_id FROM working_memory WHERE id = ? AND scope = 'global'",
+                    (payload.get("memory_id"),),
+                ).fetchone()
+                if owner and str(owner[0]) != current_session:
+                    previous_session = self._beam.session_id
+                    try:
+                        self._beam.session_id = str(owner[0])
+                        updated = self._beam.update_working(
+                            str(payload.get("memory_id") or ""),
+                            content=payload.get("content"),
+                            importance=payload.get("importance"),
+                        )
+                    finally:
+                        self._beam.session_id = previous_session
+                    mutation_raw = json.dumps(
+                        {
+                            "status": "updated" if updated else "not_found",
+                            "memory_id": payload.get("memory_id"),
+                        }
+                    )
+                else:
+                    mutation_raw = super().handle_tool_call(tool, payload)
+        else:
+            mutation_raw = super().handle_tool_call(tool, payload)
         try:
             mutation = json.loads(mutation_raw)
         except (TypeError, ValueError, json.JSONDecodeError):

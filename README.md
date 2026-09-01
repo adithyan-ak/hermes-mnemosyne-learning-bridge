@@ -21,7 +21,7 @@ The bridge adds four controls:
 
 - **Evidence-grounded episodes.** It records at most one compact episode from meaningful tool results. It does not copy user prompts, assistant prose, or raw tool output into the episode.
 - **Project isolation.** Equivalent SSH and HTTPS Git remotes map to the same hashed project ID. Project episodes are filtered during explicit recall and silent prefetch.
-- **Proportionate mutation controls.** A direct user-stated ordinary memory (`source="user"`, `veracity="stated"`, explicit scope, extraction disabled) writes immediately and is read back exactly. Ambiguous writes request clarification. Updates and deletes remain staged and require an exact foreground `APPLY <id>` plus deterministic read-back.
+- **Proportionate mutation controls.** A clear ordinary fact quoted verbatim from the current user turn writes immediately and is read back exactly. Ambiguous or ungrounded writes request clarification. Updates and deletes remain staged and require an exact foreground `APPLY <id>` plus deterministic read-back.
 - **Fail-closed policy.** Unknown and unsupported mutation families stay hidden or blocked.
 
 ## What it stores
@@ -74,7 +74,7 @@ Set these values with `hermes config set`; do not hand-edit the live Hermes conf
 
 Only these mutation families are currently supported:
 
-- `mnemosyne_remember` — direct only for explicit user-stated ordinary memories; otherwise returns `clarification_required`
+- `mnemosyne_remember` — direct only when content is a verbatim span of the current user turn with explicit user/stated provenance; otherwise returns `clarification_required`
 - `mnemosyne_update`
 - `mnemosyne_forget`
 
