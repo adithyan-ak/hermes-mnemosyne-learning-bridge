@@ -1,6 +1,6 @@
 import mnemosyne_hermes
 
-from mnemosyne_learning_bridge.policy import Decision, classify_tool
+from mnemosyne_learning_bridge.policy import Decision, classify_tool, is_tool_visible
 
 
 def _base_tool_names() -> set[str]:
@@ -14,6 +14,14 @@ def test_every_installed_mnemosyne_tool_has_an_explicit_policy() -> None:
 
     assert decisions
     assert Decision.UNKNOWN not in decisions.values()
+
+
+def test_schema_visibility_is_explicit_and_fails_closed() -> None:
+    assert is_tool_visible("mnemosyne_remember") is True
+    assert is_tool_visible("mnemosyne_batch") is True
+    assert is_tool_visible("mnemosyne_sleep") is True
+    assert is_tool_visible("mnemosyne_apply_pending") is False
+    assert is_tool_visible("mnemosyne_unreviewed") is False
 
 
 def test_direct_stated_user_memory_is_written_without_second_approval() -> None:

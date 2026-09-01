@@ -61,6 +61,23 @@ _BLOCK_TOOLS = {
     "mnemosyne_apply_pending",
 }
 
+_VISIBLE_TOOLS = (
+    _READ_TOOLS
+    | _STAGE_TOOLS
+    | {
+        "mnemosyne_remember",
+        "mnemosyne_batch",
+        "mnemosyne_sleep",
+        "mnemosyne_diagnose",
+        "mnemosyne_recall_diagnostics",
+    }
+)
+
+
+def is_tool_visible(tool_name: str) -> bool:
+    """Return whether a reviewed tool should be advertised to the model."""
+    return tool_name in _VISIBLE_TOOLS
+
 
 def classify_tool(tool_name: str, args: dict[str, Any]) -> Decision:
     if tool_name in _READ_TOOLS:

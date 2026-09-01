@@ -17,7 +17,7 @@ from . import __version__
 from .evidence import Episode, build_episode, latest_completed_turn
 from .filtering import filter_prefetch_text, filter_recall_payload
 from .pending import claim_pending, list_pending, stage_mutation
-from .policy import Decision, classify_tool
+from .policy import Decision, classify_tool, is_tool_visible
 from .project import normalize_project_id, normalize_project_reference
 
 logger = logging.getLogger(__name__)
@@ -220,7 +220,7 @@ class ProjectAwareMnemosyneProvider(MnemosyneMemoryProvider):
         schemas = []
         for schema in super().get_tool_schemas():
             name = str(schema.get("name") or "")
-            if classify_tool(name, {}) not in {Decision.BLOCK, Decision.UNKNOWN}:
+            if is_tool_visible(name):
                 schemas.append(schema)
         return schemas + list(self._BRIDGE_TOOL_SCHEMAS)
 

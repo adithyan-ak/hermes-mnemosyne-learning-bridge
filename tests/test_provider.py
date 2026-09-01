@@ -607,6 +607,13 @@ def test_builtin_memory_write_never_calls_upstream_mirror(monkeypatch) -> None:
     assert upstream_called.is_set() is False
 
 
+def test_provider_exposes_conditionally_allowed_upstream_tools() -> None:
+    provider = ProjectAwareMnemosyneProvider()
+    names = {schema["name"] for schema in provider.get_tool_schemas()}
+
+    assert {"mnemosyne_remember", "mnemosyne_batch", "mnemosyne_sleep"} <= names
+
+
 def test_provider_exposes_bridge_approval_tools_and_hides_unsafe_upstream_apply() -> None:
     provider = ProjectAwareMnemosyneProvider()
     schemas = {schema["name"]: schema for schema in provider.get_tool_schemas()}
