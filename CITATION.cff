@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: "Kumar"
     given-names: "Adithyan Arun"
-version: 0.2.1
-date-released: 2026-08-31
+version: 0.2.2
+date-released: 2026-09-01
 repository-code: "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge"
 url: "https://github.com/adithyan-ak/hermes-mnemosyne-learning-bridge"
 license: MIT

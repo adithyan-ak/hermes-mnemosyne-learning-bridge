@@ -91,7 +91,7 @@ Check that:
 
 Use a disposable value that contains no credentials, personal facts, customer data, private paths, or repository names.
 
-1. In a fresh Hermes session, request an ordinary global write with a unique synthetic value, `source="user"`, `veracity="stated"`, `extract=false`, and `extract_entities=false`.
+1. In a fresh Hermes session, state a unique synthetic fact naturally. The resulting ordinary global write must quote that fact verbatim and use `source="user"`, `veracity="stated"`, `extract=false`, and `extract_entities=false`.
 2. Confirm that `mnemosyne_remember` returns `status="stored"` or `status="deduplicated"`, `verified=true`, and an exact deterministic `readback`. It must not create a pending record.
 3. Send an intentionally incomplete synthetic write and confirm that it returns `status="clarification_required"` without writing or staging anything.
 4. Start another Hermes process in the same repository and recall the canary using different wording.

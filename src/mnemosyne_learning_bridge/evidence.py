@@ -57,11 +57,29 @@ _TRUSTED_VERIFIED_WRITE_TOOLS = frozenset({"patch", "write_file"})
 
 
 def contains_secret(value: Any) -> bool:
+    raw_strings: list[str] = []
+
+    def collect(item: Any) -> None:
+        if isinstance(item, str):
+            raw_strings.append(item)
+        elif isinstance(item, dict):
+            for key, nested in item.items():
+                collect(str(key))
+                collect(nested)
+        elif isinstance(item, (list, tuple, set)):
+            for nested in item:
+                collect(nested)
+
+    collect(value)
     try:
         text = json.dumps(value, ensure_ascii=False, sort_keys=True)
     except (TypeError, ValueError):
         text = str(value)
-    return any(pattern.search(text) for pattern in _SECRET_PATTERNS)
+    return any(
+        pattern.search(candidate)
+        for candidate in [text, *raw_strings]
+        for pattern in _SECRET_PATTERNS
+    )
 
 
 def latest_completed_turn(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -113,10 +131,15 @@ def _evidence(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], lis
         command = str(args.get("command") or "")
         exit_code = result.get("exit_code")
         if isinstance(exit_code, int) and name == "terminal":
+            command_lower = command.lower()
+            test_probe_only = bool(
+                re.search(r"(?:^|\s)(?:--version|--help|-h|--collect-only)(?:\s|$)", command_lower)
+            )
             kind = (
                 "test_result"
-                if any(
-                    token in command.lower()
+                if not test_probe_only
+                and any(
+                    token in command_lower
                     for token in ("pytest", "unittest", "npm test", "cargo test", "go test")
                 )
                 else "exit_status"
